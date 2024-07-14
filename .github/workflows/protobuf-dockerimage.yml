@@ -13,6 +13,9 @@ on:
       - protobuf/Dockerfile
       - protobuf/protoc-wrapper
 
+env:
+  DOCKERHUB_SLUG: otel/build-protobuf
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,7 +24,18 @@ jobs:
         image: registry:2
         ports:
           - 5000:5000
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
     steps:
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -30,22 +44,19 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            name=otel/build-protobuf,enable=${{ github.event_name != 'pull_request' }}
-            name=localhost:5000/otel/build-protobuf
+            name=${{ env.DOCKERHUB_SLUG}}
           tags: |
             type=edge
             type=ref,event=pr
             type=semver,pattern={{version}}
 
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
           driver-opts: network=host
-
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
 
       - name: DockerHub Login
         uses: docker/login-action@v3
@@ -54,20 +65,75 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
         if: github.event_name != 'pull_request'
 
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        id: build-push
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
         with:
           context: "protobuf/."
-          cache-from: type=gha,scope=protobuf
-          cache-to: type=gha,scope=protobuf,mode=max
-          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha,scope=protobuf-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,scope=protobuf-${{ env.PLATFORM_PAIR }},mode=max
+          platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
-          platforms: "linux/amd64"
-          # platforms: "linux/arm64, linux/amd64"
-          push: true
           pull: true
           sbom: true
           provenance: mode=max
-          no-cache: ${{ github.event_name != 'pull_request' }}
+          outputs: type=image,name=${{ env.DOCKERHUB_SLUG }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+
+  merge:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    needs:
+      - build
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            name=${{ env.DOCKERHUB_SLUG}}
+          tags: |
+            type=edge
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.DOCKERHUB_SLUG }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.DOCKERHUB_SLUG }}:${{ steps.meta.outputs.version }}
