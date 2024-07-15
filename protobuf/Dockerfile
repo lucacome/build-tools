@@ -31,7 +31,7 @@ libtool \
 COPY --from=xx / /
 ARG TARGETPLATFORM
 
-RUN xx-apk add --no-cache xx-cxx-essentials zlib-dev zlib linux-headers openssl-dev
+RUN xx-apk add --no-cache xx-cxx-essentials zlib-dev zlib linux-headers openssl-dev re2-dev
 
 FROM protoc_builder_base AS protoc_builder
 
@@ -50,6 +50,7 @@ RUN xx-info env && \
     -DCMAKE_BUILD_TYPE=Release \
     -DgRPC_INSTALL=ON \
 	-DgRPC_SSL_PROVIDER=package \
+	-DgRPC_RE2_PROVIDER=package \
     -DgRPC_BUILD_TESTS=OFF \
     ../.. && \
     make -j$(nproc) && \
@@ -59,7 +60,7 @@ RUN xx-info env && \
 FROM protoc_builder AS protobuf_builder
 
 ARG PROTOBUF_C_VERSION
-ADD https://github.com/protobuf-c/protobuf-c/archive/v${PROTOBUF_C_VERSION}.tar.gz /protobuf-c.tar.gz
+ADD https://github.com/protobuf-c/protobuf-c/releases/download/protobuf-c-${PROTOBUF_C_VERSION}.tar.gz /protobuf-c.tar.gz
 
 RUN mkdir -p /protobuf-c && \
 	tar xzf /protobuf-c.tar.gz --strip 1 -C /protobuf-c && \
@@ -71,11 +72,9 @@ RUN mkdir -p /protobuf-c && \
     make && make install DESTDIR=/out
 
 ARG GRPC_JAVA_VERSION
-ADD https://github.com/grpc/grpc-java/archive/v${GRPC_JAVA_VERSION}.tar.gz /grpc-java.tar.gz
+ADD https://github.com/grpc/grpc-java.git#v${GRPC_JAVA_VERSION} /grpc-java
 
-RUN mkdir -p /grpc-java && \
-	tar xzf /grpc-java.tar.gz --strip 1 -C /grpc-java && \
-	cd /grpc-java && \
+RUN cd /grpc-java && \
     g++ \
     -I. -I/usr/include \
     compiler/src/java_plugin/cpp/*.cpp \
