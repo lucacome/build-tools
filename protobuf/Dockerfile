@@ -27,12 +27,12 @@ libtool \
 	lld \
 	gcompat \
 	protobuf-dev \
-    zlib-dev
+    zlib-dev re2-dev
 
 COPY --from=xx / /
 ARG TARGETPLATFORM
 
-RUN xx-apk add --no-cache xx-cxx-essentials zlib-dev zlib linux-headers openssl-dev
+RUN xx-apk add --no-cache xx-cxx-essentials zlib-dev zlib linux-headers openssl-dev re2-dev
 
 FROM protoc_builder_base AS protoc_builder
 
@@ -50,6 +50,7 @@ RUN xx-info env && \
     -DCMAKE_INSTALL_PREFIX=/out \
     -DCMAKE_BUILD_TYPE=Release \
     -DgRPC_INSTALL=ON \
+    -DgRPC_RE2_PROVIDER=package      \
     -DgRPC_SSL_PROVIDER=package      \
     -DgRPC_ZLIB_PROVIDER=package \
     -DgRPC_BUILD_TESTS=OFF \
