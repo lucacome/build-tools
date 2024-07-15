@@ -49,6 +49,7 @@ RUN xx-info env && \
     -DCMAKE_INSTALL_PREFIX=/out \
     -DCMAKE_BUILD_TYPE=Release \
     -DgRPC_INSTALL=ON \
+	-DgRPC_SSL_PROVIDER=package \
     -DgRPC_BUILD_TESTS=OFF \
     ../.. && \
     make -j$(nproc) && \
