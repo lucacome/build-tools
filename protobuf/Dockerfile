@@ -27,12 +27,12 @@ libtool \
 	lld \
 	gcompat \
 	protobuf-dev \
-    zlib-dev re2-dev
+    zlib-dev
 
 COPY --from=xx / /
 ARG TARGETPLATFORM
 
-RUN xx-apk add --no-cache xx-cxx-essentials zlib-dev zlib linux-headers openssl-dev re2-dev
+RUN xx-apk add --no-cache xx-cxx-essentials zlib-dev zlib linux-headers openssl-dev
 
 FROM protoc_builder_base AS protoc_builder
 
@@ -42,10 +42,6 @@ ARG GRPC_VERSION
 ADD https://github.com/grpc/grpc.git#v${GRPC_VERSION} /grpc
 RUN xx-info env && \
     ln -s /grpc/third_party/protobuf /protobuf && \
-	cd grpc && \
-	git submodule update --depth 1 --init -- "third_party/abseil-cpp" && \
-    # Get protobuf
-    git submodule update --depth 1 --init -- "third_party/protobuf" && \
     mkdir -p /grpc/cmake/build && \
     cd /grpc/cmake/build && \
     cmake $(xx-clang --print-cmake-defines) \
@@ -54,10 +50,6 @@ RUN xx-info env && \
     -DCMAKE_INSTALL_PREFIX=/out \
     -DCMAKE_BUILD_TYPE=Release \
     -DgRPC_INSTALL=ON \
-    -DgRPC_ABSL_PROVIDER=module     \
-    -DgRPC_CARES_PROVIDER=package    \
-    -DgRPC_PROTOBUF_PROVIDER=module \
-    -DgRPC_RE2_PROVIDER=package      \
     -DgRPC_SSL_PROVIDER=package      \
     -DgRPC_ZLIB_PROVIDER=package \
     -DgRPC_BUILD_TESTS=OFF \
