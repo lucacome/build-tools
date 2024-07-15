@@ -14,7 +14,7 @@ on:
       - protobuf/protoc-wrapper
 
 env:
-  DOCKERHUB_SLUG: otel/build-protobuf
+  DOCKERHUB_SLUG: ghcr.io/lucacome/build-protobuf
   GHCR_SLUG: ghcr.io/lucacome/build-protobuf
 
 jobs:
