@@ -25,14 +25,13 @@ libtool \
 	clang \
 	cmake \
 	lld \
-	gcompat \
-	protobuf-dev \
-    zlib-dev
+	gcompat
 
 COPY --from=xx / /
 ARG TARGETPLATFORM
 
-RUN xx-apk add --no-cache xx-cxx-essentials zlib-dev zlib linux-headers openssl-dev
+RUN xx-apk add --no-cache xx-cxx-essentials zlib-dev zlib linux-headers openssl-dev \
+	c-ares-dev re2-dev abseil-cpp-dev
 
 FROM protoc_builder_base AS protoc_builder
 
@@ -50,12 +49,16 @@ RUN xx-info env && \
     -DCMAKE_INSTALL_PREFIX=/out \
     -DCMAKE_BUILD_TYPE=Release \
     -DgRPC_INSTALL=ON \
+	# -DgRPC_ABSL_PROVIDER=package     \
+	# -DgRPC_RE2_PROVIDER=package      \
+    # -DgRPC_CARES_PROVIDER=module    \
     -DgRPC_SSL_PROVIDER=package      \
     -DgRPC_ZLIB_PROVIDER=package \
     -DgRPC_BUILD_TESTS=OFF \
     ../.. && \
-    make -j$(nproc) && \
-	make install && \
+    cmake --build . --target plugins -- -j$(nproc) && \
+    cmake --build . --target install && \
+    DESTDIR=/out cmake --build . --target install && \
 	xx-verify /out/lib/libgrpc.so
 
 FROM protoc_builder AS protobuf_builder
