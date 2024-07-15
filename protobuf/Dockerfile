@@ -26,7 +26,7 @@ libtool \
 	lld \
 	gcompat \
 	protobuf-dev \
-    zlib-dev
+    zlib-dev re2-dev abseil-cpp-dev c-ares-dev
 
 COPY --from=xx / /
 ARG TARGETPLATFORM
