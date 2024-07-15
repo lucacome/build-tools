@@ -27,12 +27,12 @@ libtool \
 	lld \
 	gcompat \
 	protobuf-dev \
-    zlib-dev re2-dev abseil-cpp-dev c-ares-dev
+    zlib-dev re2-dev c-ares-dev
 
 COPY --from=xx / /
 ARG TARGETPLATFORM
 
-RUN xx-apk add --no-cache xx-cxx-essentials zlib-dev zlib linux-headers openssl-dev re2-dev abseil-cpp-dev c-ares-dev
+RUN xx-apk add --no-cache xx-cxx-essentials zlib-dev zlib linux-headers openssl-dev re2-dev c-ares-dev
 
 FROM protoc_builder_base AS protoc_builder
 
