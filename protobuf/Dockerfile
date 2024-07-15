@@ -25,7 +25,12 @@ libtool \
 	clang \
 	cmake \
 	lld \
-	gcompat
+	gcompat \
+	zlib-dev \
+	openssl-dev \
+	c-ares-dev \
+	re2-dev \
+	abseil-cpp-dev
 
 COPY --from=xx / /
 ARG TARGETPLATFORM
