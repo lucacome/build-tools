@@ -1,61 +1,94 @@
 # gRPC core version that applies to C++, C#, Objective-C, PhP, Python, Ruby
-ARG GRPC_VERSION=1.52.0
-ARG PROTOBUF_C_VERSION=1.4.1
-ARG GRPC_WEB_VERSION=1.3.0
+ARG GRPC_VERSION=1.65.0
+ARG PROTOBUF_C_VERSION=1.5.0
+ARG GRPC_WEB_VERSION=1.5.0
+ARG GRPC_JAVA_VERSION=1.65.1
 
-ARG PROTOC_GEN_GO_VERSION=1.5.2
-ARG PROTOC_GEN_GO_GRPC_VERSION=1.41.0
-ARG GRPC_JAVA_VERSION=1.51.3
-# v1.3.2, using the version directly does not work: "tar: invalid magic"
-ARG PROTOC_GEN_GOGO_VERSION=b03c65ea87cdc3521ede29f62fe3ce239267c1bc
+ARG PROTOC_GEN_GO_VERSION=1.32.0
+ARG PROTOC_GEN_GO_GRPC_VERSION=1.52.3
+
+# use the lastest commit from master
+ARG PROTOC_GEN_GOGO_VERSION=f67b8970b736e53dbd7d0a27146c8f1ac52f74e5
 ARG PROTOC_GEN_LINT_VERSION=0.3.0
-ARG GRPC_GATEWAY_VERSION=2.15.0
+ARG GRPC_GATEWAY_VERSION=2.19.1
 ARG PROTOC_GEN_PARQUET_VERSION=0.4.3
-ARG UPX_VERSION=4.0.2
+ARG UPX_VERSION=4.2.2
 
-ARG TARGETARCH=amd64
+FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.4.0 AS xx
 
-FROM alpine:3.18 as protoc_builder
-RUN apk add --no-cache build-base curl automake autoconf libtool git zlib-dev linux-headers cmake ninja
+FROM --platform=$BUILDPLATFORM alpine:3.20 AS protoc_builder_base
+RUN apk add --no-cache \
+	alpine-sdk \
+	automake \
+autoconf \
+libtool \
+	clang \
+	cmake \
+	lld \
+	gcompat \
+	zlib-dev \
+	openssl-dev \
+	c-ares-dev \
+	re2-dev \
+	abseil-cpp-dev
+
+COPY --from=xx / /
+ARG TARGETPLATFORM
+
+RUN xx-apk add --no-cache xx-cxx-essentials zlib-dev zlib linux-headers openssl-dev \
+	c-ares-dev re2-dev abseil-cpp-dev
+
+FROM protoc_builder_base AS protoc_builder
 
 RUN mkdir -p /out
 
 ARG GRPC_VERSION
-RUN git clone --recursive --depth=1 -b v${GRPC_VERSION} https://github.com/grpc/grpc.git /grpc && \
+ADD https://github.com/grpc/grpc.git#v${GRPC_VERSION} /grpc
+RUN xx-info env && \
     ln -s /grpc/third_party/protobuf /protobuf && \
     mkdir -p /grpc/cmake/build && \
     cd /grpc/cmake/build && \
-    cmake \
-    -GNinja \
+    cmake $(xx-clang --print-cmake-defines) \
+    # -GNinja \
     -DBUILD_SHARED_LIBS=ON \
-    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_PREFIX=/out \
     -DCMAKE_BUILD_TYPE=Release \
     -DgRPC_INSTALL=ON \
+	# -DgRPC_ABSL_PROVIDER=package     \
+	# -DgRPC_RE2_PROVIDER=package      \
+    # -DgRPC_CARES_PROVIDER=module    \
+    -DgRPC_SSL_PROVIDER=package      \
+    -DgRPC_ZLIB_PROVIDER=package \
     -DgRPC_BUILD_TESTS=OFF \
     ../.. && \
-    cmake --build . --target plugins && \
+    cmake --build . --target plugins -- -j$(nproc) && \
     cmake --build . --target install && \
-    DESTDIR=/out cmake --build . --target install
+    DESTDIR=/out cmake --build . --target install && \
+	xx-verify /out/lib/libgrpc.so
+
+FROM protoc_builder AS protobuf_builder
 
 ARG PROTOBUF_C_VERSION
+ADD https://github.com/protobuf-c/protobuf-c/releases/download/protobuf-c-${PROTOBUF_C_VERSION}.tar.gz /protobuf-c.tar.gz
+
 RUN mkdir -p /protobuf-c && \
-    curl -sSL https://api.github.com/repos/protobuf-c/protobuf-c/tarball/v${PROTOBUF_C_VERSION} | tar xz --strip 1 -C /protobuf-c && \
+	tar xzf /protobuf-c.tar.gz --strip 1 -C /protobuf-c && \
     cd /protobuf-c && \
-    export LD_LIBRARY_PATH=/usr/lib:/usr/lib64 && \
-    export PKG_CONFIG_PATH=/usr/lib64/pkgconfig && \
+    # export LD_LIBRARY_PATH=/usr/lib:/usr/lib64 && \
+    # export PKG_CONFIG_PATH=/usr/lib64/pkgconfig && \
     ./autogen.sh && \
-    ./configure --prefix=/usr && \
+    ./configure --host=$(xx-clang --print-target-triple) && \
     make && make install DESTDIR=/out
 
 ARG GRPC_JAVA_VERSION
-RUN mkdir -p /grpc-java && \
-    curl -sSL https://api.github.com/repos/grpc/grpc-java/tarball/v${GRPC_JAVA_VERSION} | tar xz --strip 1 -C /grpc-java && \
-    cd /grpc-java && \
+ADD https://github.com/grpc/grpc-java.git#v${GRPC_JAVA_VERSION} /grpc-java
+
+RUN cd /grpc-java && \
     g++ \
     -I. -I/usr/include \
     compiler/src/java_plugin/cpp/*.cpp \
     -L/usr/lib64 \
-    -lprotoc -lprotobuf -lpthread --std=c++0x -s \
+    -lprotoc -lprotobuf -lpthread -s \
     -o protoc-gen-grpc-java && \
     install -Ds protoc-gen-grpc-java /out/usr/bin/protoc-gen-grpc-java && \
     rm -Rf /grpc-java && \
@@ -68,7 +101,9 @@ RUN mkdir -p /grpc-web && \
     make install-plugin && \
     install -Ds /usr/local/bin/protoc-gen-grpc-web /out/usr/bin/protoc-gen-grpc-web
 
-FROM golang:1.18-alpine3.14 as go_builder
+
+############# Build go ################
+FROM golang:1.22-alpine as go_builder
 RUN apk add --no-cache build-base curl git
 
 ARG PROTOC_GEN_GO_GRPC_VERSION
@@ -79,10 +114,10 @@ RUN mkdir -p ${GOPATH}/src/github.com/grpc/grpc-go && \
     install -Ds /golang-protobuf-out/protoc-gen-go-grpc /out/usr/bin/protoc-gen-go-grpc
 
 ARG PROTOC_GEN_GO_VERSION
-RUN mkdir -p ${GOPATH}/src/github.com/golang/protobuf && \
-    curl -sSL https://api.github.com/repos/golang/protobuf/tarball/v${PROTOC_GEN_GO_VERSION} | tar xz --strip 1 -C ${GOPATH}/src/github.com/golang/protobuf &&\
-    cd ${GOPATH}/src/github.com/golang/protobuf && \
-    go build -ldflags '-w -s' -o /golang-protobuf-out/protoc-gen-go ./protoc-gen-go && \
+RUN mkdir -p ${GOPATH}/src/github.com/protocolbuffers/protobuf-go && \
+    curl -sSL https://api.github.com/repos/protocolbuffers/protobuf-go/tarball/v${PROTOC_GEN_GO_VERSION} | tar xz --strip 1 -C ${GOPATH}/src/github.com/protocolbuffers/protobuf-go &&\
+    cd ${GOPATH}/src/github.com/protocolbuffers/protobuf-go && \
+    go build -ldflags '-w -s' -o /golang-protobuf-out/protoc-gen-go ./cmd/protoc-gen-go && \
     install -Ds /golang-protobuf-out/protoc-gen-go /out/usr/bin/protoc-gen-go
 
 ARG PROTOC_GEN_GOGO_VERSION
@@ -108,7 +143,7 @@ RUN cd / && \
     mkdir -p /protoc-gen-lint-out && \
     cd /protoc-gen-lint-out && \
     unzip -q /protoc-gen-lint_linux_${TARGETARCH}.zip && \
-    install -Ds /protoc-gen-lint-out/protoc-gen-lint /out/usr/bin/protoc-gen-lint
+    install -D /protoc-gen-lint-out/protoc-gen-lint /out/usr/bin/protoc-gen-lint
 
 ARG GRPC_GATEWAY_VERSION
 RUN mkdir -p ${GOPATH}/src/github.com/grpc-ecosystem/grpc-gateway && \
@@ -130,6 +165,8 @@ RUN mkdir -p ${GOPATH}/src/github.com/atoulme/protoc-gen-parquet && \
     mkdir -p /out/usr/include/protoc-gen-parquet/options && \
     install -D $(find ./parquet_options -name '*.proto') -t /out/usr/include/protoc-gen-parquet/options
 
+
+############# Packer ###############
 FROM alpine:3.18 as packer
 RUN apk add --no-cache curl
 
@@ -156,6 +193,7 @@ RUN upx --lzma $(find /out/usr/bin/ \
 RUN find /out -name "*.a" -delete -or -name "*.la" -delete
 
 
+############# Final Image ###############
 FROM alpine:3.18
 LABEL maintainer="The OpenTelemetry Authors"
 COPY --from=packer /out/ /
