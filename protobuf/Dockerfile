@@ -42,6 +42,10 @@ ARG GRPC_VERSION
 ADD https://github.com/grpc/grpc.git#v${GRPC_VERSION} /grpc
 RUN xx-info env && \
     ln -s /grpc/third_party/protobuf /protobuf && \
+	cd grpc && \
+	git submodule update --depth 1 --init -- "third_party/abseil-cpp" && \
+    # Get protobuf
+    git submodule update --depth 1 --init -- "third_party/protobuf" && \
     mkdir -p /grpc/cmake/build && \
     cd /grpc/cmake/build && \
     cmake $(xx-clang --print-cmake-defines) \
@@ -50,6 +54,9 @@ RUN xx-info env && \
     -DCMAKE_INSTALL_PREFIX=/out \
     -DCMAKE_BUILD_TYPE=Release \
     -DgRPC_INSTALL=ON \
+    -DgRPC_ABSL_PROVIDER=module     \
+    -DgRPC_CARES_PROVIDER=package    \
+    -DgRPC_PROTOBUF_PROVIDER=module \
     -DgRPC_RE2_PROVIDER=package      \
     -DgRPC_SSL_PROVIDER=package      \
     -DgRPC_ZLIB_PROVIDER=package \
