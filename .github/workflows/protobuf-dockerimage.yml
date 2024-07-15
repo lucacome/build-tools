@@ -84,6 +84,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
+          target: protoc_builder
           pull: true
           sbom: true
           provenance: mode=max

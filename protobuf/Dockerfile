@@ -13,42 +13,68 @@ ARG GRPC_GATEWAY_VERSION=2.19.1
 ARG PROTOC_GEN_PARQUET_VERSION=0.4.3
 ARG UPX_VERSION=4.2.2
 
-FROM alpine:3.18 as protoc_builder
-RUN apk add --no-cache build-base curl automake autoconf libtool git zlib-dev linux-headers cmake ninja
+FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.4.0 AS xx
+
+FROM --platform=$BUILDPLATFORM alpine:3.20 AS protoc_builder_base
+RUN apk add --no-cache \
+	alpine-sdk \
+	automake \
+autoconf \
+libtool \
+	clang \
+	cmake \
+	lld \
+	gcompat \
+	protobuf-dev \
+    zlib-dev
+
+COPY --from=xx / /
+ARG TARGETPLATFORM
+
+RUN xx-apk add --no-cache xx-cxx-essentials zlib-dev zlib linux-headers openssl-dev
+
+FROM protoc_builder_base AS protoc_builder
 
 RUN mkdir -p /out
 
 ARG GRPC_VERSION
-RUN git clone --recursive --depth=1 -b v${GRPC_VERSION} https://github.com/grpc/grpc.git /grpc && \
+ADD https://github.com/grpc/grpc.git#v${GRPC_VERSION} /grpc
+RUN xx-info env && \
     ln -s /grpc/third_party/protobuf /protobuf && \
     mkdir -p /grpc/cmake/build && \
     cd /grpc/cmake/build && \
-    cmake \
-    -GNinja \
+    cmake $(xx-clang --print-cmake-defines) \
+    # -GNinja \
     -DBUILD_SHARED_LIBS=ON \
-    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_PREFIX=/out \
     -DCMAKE_BUILD_TYPE=Release \
     -DgRPC_INSTALL=ON \
     -DgRPC_BUILD_TESTS=OFF \
     ../.. && \
-    cmake --build . --target plugins && \
-    cmake --build . --target install && \
-    DESTDIR=/out cmake --build . --target install
+    make -j$(nproc) && \
+	make install && \
+	xx-verify /out/lib/libgrpc.so
+
+FROM protoc_builder AS protobuf_builder
 
 ARG PROTOBUF_C_VERSION
+ADD https://github.com/protobuf-c/protobuf-c/archive/v${PROTOBUF_C_VERSION}.tar.gz /protobuf-c.tar.gz
+
 RUN mkdir -p /protobuf-c && \
-    curl -sSL https://api.github.com/repos/protobuf-c/protobuf-c/tarball/v${PROTOBUF_C_VERSION} | tar xz --strip 1 -C /protobuf-c && \
+	tar xzf /protobuf-c.tar.gz --strip 1 -C /protobuf-c && \
     cd /protobuf-c && \
-    export LD_LIBRARY_PATH=/usr/lib:/usr/lib64 && \
-    export PKG_CONFIG_PATH=/usr/lib64/pkgconfig && \
+    # export LD_LIBRARY_PATH=/usr/lib:/usr/lib64 && \
+    # export PKG_CONFIG_PATH=/usr/lib64/pkgconfig && \
     ./autogen.sh && \
-    ./configure --prefix=/usr && \
+    ./configure --host=$(xx-clang --print-target-triple) && \
     make && make install DESTDIR=/out
 
 ARG GRPC_JAVA_VERSION
+ADD https://github.com/grpc/grpc-java/archive/v${GRPC_JAVA_VERSION}.tar.gz /grpc-java.tar.gz
+
 RUN mkdir -p /grpc-java && \
-    curl -sSL https://api.github.com/repos/grpc/grpc-java/tarball/v${GRPC_JAVA_VERSION} | tar xz --strip 1 -C /grpc-java && \
-    cd /grpc-java && \
+	tar xzf /grpc-java.tar.gz --strip 1 -C /grpc-java && \
+	cd /grpc-java && \
     g++ \
     -I. -I/usr/include \
     compiler/src/java_plugin/cpp/*.cpp \
@@ -66,6 +92,8 @@ RUN mkdir -p /grpc-web && \
     make install-plugin && \
     install -Ds /usr/local/bin/protoc-gen-grpc-web /out/usr/bin/protoc-gen-grpc-web
 
+
+############# Build go ################
 FROM golang:1.22-alpine as go_builder
 RUN apk add --no-cache build-base curl git
 
@@ -128,6 +156,8 @@ RUN mkdir -p ${GOPATH}/src/github.com/atoulme/protoc-gen-parquet && \
     mkdir -p /out/usr/include/protoc-gen-parquet/options && \
     install -D $(find ./parquet_options -name '*.proto') -t /out/usr/include/protoc-gen-parquet/options
 
+
+############# Packer ###############
 FROM alpine:3.18 as packer
 RUN apk add --no-cache curl
 
@@ -154,6 +184,7 @@ RUN upx --lzma $(find /out/usr/bin/ \
 RUN find /out -name "*.a" -delete -or -name "*.la" -delete
 
 
+############# Final Image ###############
 FROM alpine:3.18
 LABEL maintainer="The OpenTelemetry Authors"
 COPY --from=packer /out/ /
